@@ -9,6 +9,7 @@ import (
 
 	"github.com/stellar/go/services/horizon/internal/db2/core"
 	"github.com/stellar/go/services/horizon/internal/db2/history"
+	"github.com/stellar/go/services/horizon/internal/ledger"
 	"github.com/stellar/go/services/horizon/internal/txsub"
 	"github.com/stellar/go/xdr"
 )
@@ -24,6 +25,8 @@ var _ txsub.ResultProvider = &DB{}
 
 // ResultByHash implements txsub.ResultProvider
 func (rp *DB) ResultByHash(ctx context.Context, hash string) txsub.Result {
+	historyLatest := ledger.CurrentState().HistoryLatest
+
 	// query history database
 	var hr history.Transaction
 	err := rp.History.TransactionByHash(&hr, hash)
@@ -41,8 +44,12 @@ func (rp *DB) ResultByHash(ctx context.Context, hash string) txsub.Result {
 	// latest ingested ledger. This was incorrect because history DB contains
 	// successful transactions only. So it was possible that the transaction was
 	// never found and clients were receiving Timeout errors.
+	// However we can't change it to simply find a transaction by hash because
+	// `txhistory` table does not have an index on `txid` field. Because of this
+	// we query a few last ledgers to not kill the DB by searching for a value
+	// on a table with millions of rows.
 	// If you are modifying the code here, please do not make this error again.
-	err = rp.Core.TransactionByHash(&cr, hash)
+	err = rp.Core.TransactionByHashAfterLedger(&cr, hash, historyLatest-10)
 	if err == nil {
 		return txResultFromCore(cr)
 	}
