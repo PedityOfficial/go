@@ -46,10 +46,12 @@ func (rp *DB) ResultByHash(ctx context.Context, hash string) txsub.Result {
 	// never found and clients were receiving Timeout errors.
 	// However we can't change it to simply find a transaction by hash because
 	// `txhistory` table does not have an index on `txid` field. Because of this
-	// we query a few last ledgers to not kill the DB by searching for a value
-	// on a table with millions of rows.
+	// we query the last 120 ledgers (~10 minutes) to not kill the DB by searching
+	// for a value on a table with millions of rows but also to support returning
+	// the failed tx result (when resubmitting) for 10 minutes (or before core
+	// clears `txhistory` table, whatever is first).
 	// If you are modifying the code here, please do not make this error again.
-	err = rp.Core.TransactionByHashAfterLedger(&cr, hash, historyLatest-10)
+	err = rp.Core.TransactionByHashAfterLedger(&cr, hash, historyLatest-120)
 	if err == nil {
 		return txResultFromCore(cr)
 	}
