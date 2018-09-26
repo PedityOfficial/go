@@ -15,7 +15,9 @@ import (
 // Its methods tie together the various pieces used to reliably submit transactions
 // to a stellar-core instance.
 type System struct {
-	initializer sync.Once
+	initializer    sync.Once
+	tickInProgress bool
+	tickMutex      sync.Mutex
 
 	Pending           OpenSubmissionList
 	Results           ResultProvider
@@ -167,6 +169,21 @@ func (sys *System) submitOnce(ctx context.Context, env string) SubmissionResult 
 func (sys *System) Tick(ctx context.Context) {
 	sys.Init()
 	logger := log.Ctx(ctx)
+
+	// Make sure Tick is not run concurrently
+	sys.tickMutex.Lock()
+	if sys.tickInProgress {
+		logger.Debug("ticking in progress")
+		return
+	}
+	sys.tickInProgress = true
+	sys.tickMutex.Unlock()
+
+	defer func() {
+		sys.tickMutex.Lock()
+		sys.tickInProgress = false
+		sys.tickMutex.Unlock()
+	}()
 
 	logger.
 		WithField("queued", sys.SubmissionQueue.String()).
