@@ -9,7 +9,6 @@ import (
 
 	"github.com/stellar/go/services/horizon/internal/db2/core"
 	"github.com/stellar/go/services/horizon/internal/db2/history"
-	"github.com/stellar/go/services/horizon/internal/ledger"
 	"github.com/stellar/go/services/horizon/internal/txsub"
 	"github.com/stellar/go/xdr"
 )
@@ -38,7 +37,12 @@ func (rp *DB) ResultByHash(ctx context.Context, hash string) txsub.Result {
 
 	// query core database
 	var cr core.Transaction
-	err = rp.Core.TransactionByHashAfterLedger(&cr, hash, ledger.CurrentState().HistoryLatest)
+	// In the past we were searching for the transaction in core DB *after* the
+	// latest ingested ledger. This was incorrect because history DB contains
+	// successful transactions only. So it was possible that the transaction was
+	// never found and clients were receiving Timeout errors.
+	// If you are modifying the code here, please do not make this error again.
+	err = rp.Core.TransactionByHash(&cr, hash)
 	if err == nil {
 		return txResultFromCore(cr)
 	}

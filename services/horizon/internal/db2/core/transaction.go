@@ -128,16 +128,14 @@ func (tx *Transaction) SourceAddress() string {
 }
 
 // TransactionByHashAfterLedger is a query that loads a single row from the `txhistory`.
-func (q *Q) TransactionByHashAfterLedger(
+func (q *Q) TransactionByHash(
 	dest interface{},
 	hash string,
-	ledger int32,
 ) error {
 	sql := sq.Select("ctxh.*").
 		From("txhistory ctxh").
 		Limit(1).
-		Where("ctxh.txid = ?", hash).
-		Where("ctxh.ledgerseq > ?", ledger)
+		Where("ctxh.txid = ?", hash)
 
 	return q.Get(dest, sql)
 }

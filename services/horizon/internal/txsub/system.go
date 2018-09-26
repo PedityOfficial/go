@@ -2,6 +2,7 @@ package txsub
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ type System struct {
 	SubmissionQueue   *sequence.Manager
 	NetworkPassphrase string
 	SubmissionTimeout time.Duration
+	Log               *log.Entry
 
 	Metrics struct {
 		// SubmissionTimer exposes timing metrics about the rate and latency of
@@ -57,7 +59,7 @@ func (sys *System) Submit(ctx context.Context, env string) (result <-chan Result
 	// calculate hash of transaction
 	info, err := extractEnvelopeInfo(ctx, env, sys.NetworkPassphrase)
 	if err != nil {
-		sys.finish(response, Result{Err: err, EnvelopeXDR: env})
+		sys.finish(ctx, response, Result{Err: err, EnvelopeXDR: env})
 		return
 	}
 
@@ -65,20 +67,21 @@ func (sys *System) Submit(ctx context.Context, env string) (result <-chan Result
 	r := sys.Results.ResultByHash(ctx, info.Hash)
 
 	if r.Err != ErrNoResults {
-		sys.finish(response, r)
+		sys.Log.Ctx(ctx).WithField("hash", info.Hash).Info("Found submission result in a DB")
+		sys.finish(ctx, response, r)
 		return
 	}
 
 	curSeq, err := sys.Sequences.Get([]string{info.SourceAddress})
 	if err != nil {
-		sys.finish(response, Result{Err: err, EnvelopeXDR: env})
+		sys.finish(ctx, response, Result{Err: err, EnvelopeXDR: env})
 		return
 	}
 
 	// If account's sequence cannot be found, abort with tx_NO_ACCOUNT
 	// error code
 	if _, ok := curSeq[info.SourceAddress]; !ok {
-		sys.finish(response, Result{Err: ErrNoAccount, EnvelopeXDR: env})
+		sys.finish(ctx, response, Result{Err: ErrNoAccount, EnvelopeXDR: env})
 		return
 	}
 
@@ -98,7 +101,7 @@ func (sys *System) Submit(ctx context.Context, env string) (result <-chan Result
 		}
 
 		if err != nil {
-			sys.finish(response, Result{Err: err, EnvelopeXDR: env})
+			sys.finish(ctx, response, Result{Err: err, EnvelopeXDR: env})
 			return
 		}
 
@@ -116,12 +119,12 @@ func (sys *System) Submit(ctx context.Context, env string) (result <-chan Result
 		// any error other than "txBAD_SEQ" is a failure
 		isBad, err := sr.IsBadSeq()
 		if err != nil {
-			sys.finish(response, Result{Err: err, EnvelopeXDR: env})
+			sys.finish(ctx, response, Result{Err: err, EnvelopeXDR: env})
 			return
 		}
 
 		if !isBad {
-			sys.finish(response, Result{Err: sr.Err, EnvelopeXDR: env})
+			sys.finish(ctx, response, Result{Err: sr.Err, EnvelopeXDR: env})
 			return
 		}
 
@@ -130,14 +133,14 @@ func (sys *System) Submit(ctx context.Context, env string) (result <-chan Result
 
 		if r.Err == nil {
 			// If the found use it as the result
-			sys.finish(response, r)
+			sys.finish(ctx, response, r)
 		} else {
 			// finally, return the bad_seq error if no result was found on 2nd attempt
-			sys.finish(response, Result{Err: sr.Err, EnvelopeXDR: env})
+			sys.finish(ctx, response, Result{Err: sr.Err, EnvelopeXDR: env})
 		}
 
 	case <-ctx.Done():
-		sys.finish(response, Result{Err: ErrCanceled, EnvelopeXDR: env})
+		sys.finish(ctx, response, Result{Err: ErrCanceled, EnvelopeXDR: env})
 	}
 
 	return
@@ -213,6 +216,8 @@ func (sys *System) Tick(ctx context.Context) {
 // Init initializes `sys`
 func (sys *System) Init() {
 	sys.initializer.Do(func() {
+		sys.Log = log.DefaultLogger.WithField("service", "txsub.System")
+
 		sys.Metrics.FailedSubmissionsMeter = metrics.NewMeter()
 		sys.Metrics.SuccessfulSubmissionsMeter = metrics.NewMeter()
 		sys.Metrics.SubmissionTimer = metrics.NewTimer()
@@ -220,12 +225,19 @@ func (sys *System) Init() {
 		sys.Metrics.BufferedSubmissionsGauge = metrics.NewGauge()
 
 		if sys.SubmissionTimeout == 0 {
-			sys.SubmissionTimeout = 1 * time.Minute
+			// HTTP clients in SDKs usually timeout in 60 seconds. We want SubmissionTimeout
+			// to be lower than that to make sure that they read the response before the client
+			// timeout.
+			// 30 seconds is 6 ledgers (with avg. close time = 5 sec), enough for stellar-core
+			// to drop the transaction if not added to the ledger and ask client to try again
+			// by sending a Timeout response.
+			sys.SubmissionTimeout = 30 * time.Second
 		}
 	})
 }
 
-func (sys *System) finish(response chan<- Result, r Result) {
+func (sys *System) finish(ctx context.Context, response chan<- Result, r Result) {
+	sys.Log.Ctx(ctx).WithField("result", fmt.Sprintf("%+v", r)).WithField("hash", r.Hash).Info("Submission system result")
 	response <- r
 	close(response)
 }

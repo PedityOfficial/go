@@ -22,13 +22,13 @@ func TestTransactionsQueries(t *testing.T) {
 
 	// Test TransactionByHashAfterLedger
 	var tx Transaction
-	err = q.TransactionByHashAfterLedger(&tx, "cebb875a00ff6e1383aef0fd251a76f22c1f9ab2a2dffcb077855736ade2659a", 2)
+	err = q.TransactionByHash(&tx, "cebb875a00ff6e1383aef0fd251a76f22c1f9ab2a2dffcb077855736ade2659a")
 
 	if tt.Assert.NoError(err) {
 		tt.Assert.Equal(int32(3), tx.LedgerSequence)
 	}
 
-	err = q.TransactionByHashAfterLedger(&tx, "cebb875a00ff6e1383aef0fd251a76f22c1f9ab2a2dffcb077855736ade2659a", 3)
+	err = q.TransactionByHash(&tx, "e91b62146d6615473998408ce45e44f4a2929d2a0a2e3f2557e656a24df69d6d")
 
 	if tt.Assert.Error(err) {
 		tt.Assert.True(q.NoRows(err))
