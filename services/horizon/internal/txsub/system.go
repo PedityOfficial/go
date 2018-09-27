@@ -65,7 +65,10 @@ func (sys *System) Submit(ctx context.Context, env string) (result <-chan Result
 		return
 	}
 
-	sys.Log.Ctx(ctx).WithField("hash", info.Hash).Info("Processing transaction")
+	sys.Log.Ctx(ctx).WithFields(log.F{
+		"hash": info.Hash,
+		"tx":   env,
+	}).Info("Processing transaction")
 
 	// check the configured result provider for an existing result
 	r := sys.Results.ResultByHash(ctx, info.Hash)
